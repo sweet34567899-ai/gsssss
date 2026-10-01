@@ -8,6 +8,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
  
+      - name: Unpack uploaded zip files
+        run: |
+          shopt -s nullglob
+          for z in *.zip; do
+            echo "unzipping: $z"
+            unzip -o -q "$z"
+          done
+ 
+      - name: Unpack project zip (if the project was uploaded as a zip)
+        run: |
+          find . -maxdepth 3 -path ./.git -prune -o -name '*.zip' -print0 | while IFS= read -r -d '' Z; do
+            echo "unpacking: $Z"
+            unzip -oq "$Z" -d _unpacked
+          done
+ 
       - name: Show repository layout
         run: |
           echo "=== repository files ==="
@@ -17,9 +32,9 @@ jobs:
       - name: Locate project
         id: loc
         run: |
-          JAVA_DIR=$(find . -path ./.git -prune -o -type d -path '*/src/main/java' -print | head -1)
+          JAVA_DIR=$(find . -path ./.git -prune -o -type d -path '*/src/main/java' -print | awk '{print length($0) " " $0}' | sort -n | head -1 | cut -d' ' -f2-)
           if [ -z "$JAVA_DIR" ]; then
-            echo "::error::src/main/java folder not found. The code files were not uploaded to this repository."
+            echo "::error::src/main/java folder not found. Upload the project zip (elementalgaze-prototype.zip) to the repository root."
             exit 1
           fi
           DIR=$(dirname "$(dirname "$(dirname "$JAVA_DIR")")")
