@@ -1,28 +1,75 @@
 name: Build mod jar
-
 on:
   push:
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
+ 
+      - name: Show repository layout
+        run: |
+          echo "=== repository files ==="
+          find . -path ./.git -prune -o -type f -print | head -300
+          echo "java files: $(find . -path ./.git -prune -o -name '*.java' -print | wc -l)"
+ 
+      - name: Locate project
+        id: loc
+        run: |
+          JAVA_DIR=$(find . -path ./.git -prune -o -type d -path '*/src/main/java' -print | head -1)
+          if [ -z "$JAVA_DIR" ]; then
+            echo "::error::src/main/java folder not found. The code files were not uploaded to this repository."
+            exit 1
+          fi
+          DIR=$(dirname "$(dirname "$(dirname "$JAVA_DIR")")")
+          echo "project dir: $DIR"
+          if [ ! -f "$DIR/build.gradle" ]; then
+            BG=$(find . -path ./.git -prune -o -name build.gradle -print | head -1)
+            if [ -z "$BG" ]; then
+              echo "::error::build.gradle not found."
+              exit 1
+            fi
+            cp "$BG" "$DIR/build.gradle"
+            if [ -f "$(dirname "$BG")/settings.gradle" ]; then cp "$(dirname "$BG")/settings.gradle" "$DIR/settings.gradle"; fi
+          fi
+          if [ ! -f "$DIR/src/main/resources/META-INF/mods.toml" ]; then
+            MT=$(find . -path ./.git -prune -o -name mods.toml -print | head -1)
+            if [ -z "$MT" ]; then
+              echo "::error::mods.toml not found. The resources (part 2) were not uploaded."
+              exit 1
+            fi
+            RES=$(dirname "$(dirname "$MT")")
+            mkdir -p "$DIR/src/main"
+            cp -r "$RES" "$DIR/src/main/resources"
+          fi
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+ 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
-
+          java-version: '17'
+ 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.1.1
-
+          gradle-version: '8.1.1'
+ 
       - name: Build
-        run: gradle build --no-daemon
-
+        run: gradle build --no-daemon -p "${{ steps.loc.outputs.dir }}"
+ 
+      - name: Verify jar is not empty
+        run: |
+          JAR=$(ls "${{ steps.loc.outputs.dir }}"/build/libs/*.jar | head -1)
+          ls -l "$JAR"
+          N=$(unzip -l "$JAR" | grep -c '\.class' || true)
+          echo "class files in jar: $N"
+          if [ "$N" -lt 10 ]; then
+            echo "::error::The jar is empty or incomplete ($N classes)."
+            exit 1
+          fi
+          unzip -l "$JAR" | grep -q 'META-INF/mods.toml' || { echo "::error::mods.toml missing in jar"; exit 1; }
+ 
       - uses: actions/upload-artifact@v4
         with:
           name: elementalgaze-jar
-          path: build/libs/*.jar
+          path: ${{ steps.loc.outputs.dir }}/build/libs/*.jar
